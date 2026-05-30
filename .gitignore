@@ -1,0 +1,21 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.vbproj.user
+
+# Build output
+bin/
+obj/
+
+# VS host process
+*.vshost.exe
+*.vshost.exe.config
+*.vshost.exe.manifest
+
+# XML doc (generated)
+*.xml
+
+# NuGet
+packages/
+*.nupkg

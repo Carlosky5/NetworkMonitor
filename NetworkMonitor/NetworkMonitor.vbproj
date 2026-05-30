@@ -53,7 +53,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Graphy">
-      <HintPath>..\..\Graphy\Graphy\bin\Debug\Graphy.dll</HintPath>
+      <HintPath>..\lib\Graphy.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Data" />

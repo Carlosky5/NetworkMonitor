@@ -16,7 +16,7 @@ Originally written entirely by hand in VB.NET in 2015, before AI tooling existed
 - **Text-to-speech readout** of any stat via global hotkeys (works even when the app is not focused)
 - **Session reset** via hotkey or adapter switch
 - **Registry persistence** — window size, position, adapter choice, and opacity survive restarts
-- **Live graph** (powered by [Graphy](https://github.com/Tayx94/graphy)) showing download and upload history
+- **Live graph** (custom Graphy control, source in the `Graphy/` sibling project) showing download and upload history
 - **Error logging** to `errorLog.txt` alongside the executable
 
 ---
@@ -39,7 +39,7 @@ msbuild NetworkMonitor\NetworkMonitor.vbproj /p:Configuration=Release
 
 Or open `NetworkMonitor.sln` in Visual Studio 2017 or later and build normally.
 
-The `Graphy.dll` dependency is a pre-built binary included in the repository under `bin\Debug` and `bin\Release`. No package restore is needed.
+The `Graphy.dll` dependency is a pre-built binary included in the repository under `lib\`. No package restore is needed. To rebuild it from source, open the sibling `Graphy/` project and build in Debug configuration, then copy the output DLL to `lib\`.
 
 ---
 

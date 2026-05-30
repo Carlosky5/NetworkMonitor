@@ -1,6 +1,6 @@
-# Developer Notes — Borderless Window Mechanics
+# Developer Notes — Borderless Window Mechanics and Graphy Control
 
-This file documents the non-obvious traps in this codebase. It is written for someone (possibly a future AI session) who already understands .NET WinForms but has not worked with this specific project before. Read this before touching anything related to window movement, resizing, or the ColourChanger thread.
+This file documents the non-obvious traps in this codebase. It is written for someone (possibly a future AI session) who already understands .NET WinForms but has not worked with this specific project before. Read this before touching anything related to window movement, resizing, the ColourChanger thread, or the Graphy graph control.
 
 ---
 
@@ -105,3 +105,55 @@ The lock exists to protect shared stat fields (`Download.*`, `Upload.*`) that ar
 `NetworkInterface.GetAllNetworkInterfaces()` is an expensive kernel call. It runs at most once every 10 seconds (`_adapterCheckCountdown`). Between checks, the loop assumes the cached `ActiveInterface` is still valid and reads `GetIPv4Statistics()` directly.
 
 If the active adapter disappears (the loop detects this when `networkIDsMatched` is false at check time), it re-enumerates immediately and resets session stats. If you change this logic, make sure adapter loss still triggers an immediate re-enumeration rather than waiting for the next countdown expiry.
+
+---
+
+## 9. Graphy control — graph rendering traps
+
+The `Graphy.dll` in `lib/` is a custom WinForms `UserControl` (source in the sibling `Graphy/` project). Several non-obvious issues exist in its rendering pipeline.
+
+### 9a. Graph must not draw into the overlay text area
+
+**Symptom:** The graph line and fill render on top of or directly behind the "DB: / UB:" overlay text in the top-left corner, making the text hard to read.
+
+**Cause:** If graph points are computed using `y = Height * (1 - ratio * PaddingHeight)`, the topmost point sits at `Height * (1 - PaddingHeight)` pixels from the top of the control. With `PaddingHeight = 0.9` and `Height = 100`, that is only 10 px — the exact height of the overlay text at 7pt Arial. Any anti-aliasing bleed or gradient colour from the fill makes the overlap visible even when the line itself is technically below the text.
+
+**Fix:** Compute a `topMargin` from the actual font height (`_overlayFont.Height + 2`), then map all graph points into the range `[topMargin, Height]`:
+
+```csharp
+float topMargin   = ShowTextOverlay ? _overlayFont.Height + 2f : 0f;
+float graphHeight = Height - topMargin;
+y = topMargin + graphHeight * (1f - ratio * PaddingHeight);
+```
+
+The gradient fill brush must also be anchored to `topMargin → Height`, not `0 → Height`, otherwise the gradient accumulates visible colour in the text zone even though no polygon fill is drawn there.
+
+### 9b. `FillPolygon` replaces per-column `DrawLine` for gradient/fill modes
+
+The original code drew one vertical `DrawLine` per pixel column using a freshly allocated `LinearGradientBrush` and `Pen` — hundreds of GDI object pairs per frame, none disposed. The replacement is a single `FillPolygon` call with a cached brush:
+
+- Build a `PointF[count + 2]` polygon: the data line points, then bottom-right corner `(lastX, Height)`, then bottom-left corner `(firstX, Height)`.
+- Fill with a vertical `LinearGradientBrush` spanning `topMargin` (transparent) to `Height` (semi-opaque).
+
+This reduces the fill from `Width` draw calls to 1 per frame.
+
+### 9c. `DrawLines` must receive exactly `count` points — no extras
+
+`Graphics.DrawLines` draws lines between **all** elements in the array it receives. If the reusable `_pointsBuffer` has `Length > count` (e.g., allocated at a previous larger size), the extra slots contain default `PointF(0, 0)` values, causing phantom lines to the top-left corner of the control.
+
+**Fix:** Pass only the filled slice. If `_pointsBuffer.Length == count`, pass it directly. Otherwise copy the first `count` elements:
+
+```csharp
+PointF[] drawPoints = count == _pointsBuffer.Length
+    ? _pointsBuffer
+    : GetSlice(_pointsBuffer, count);
+g.DrawLines(_linePen, drawPoints);
+```
+
+The buffer only ever grows (never shrinks mid-session), so after the warmup phase it equals `count` exactly and no copy is needed.
+
+### 9d. All GDI resources in the Graphy control must be cached
+
+The control creates `LinearGradientBrush`, `Pen`, `SolidBrush`, and `Font` objects. Every one of these must be cached as a field and only recreated when their inputs change (`LineColour`, `Height`, `topMargin`, `OverlayColour`, `IndexIndicatorColour`, `Parent.BackColor`). Creating them fresh inside `Paint` — especially inside a per-pixel loop — causes hundreds of unmanaged GDI handle allocations per second.
+
+All cached resources are disposed in `DisposeGdiResources()`, called from the Designer-generated `Dispose(bool)` override.

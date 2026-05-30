@@ -108,11 +108,47 @@ If the active adapter disappears (the loop detects this when `networkIDsMatched`
 
 ---
 
-## 9. Graphy control — graph rendering traps
+## 9. Graphy dependency — what it is and how the DLL flows in
+
+NetworkMonitor displays live network speed graphs using **[Graphy](https://github.com/Carlosky5/Graphy)**, a custom WinForms `UserControl` maintained as a separate project. Understanding the dependency structure is important before touching anything graph-related.
+
+### How the DLL gets into NetworkMonitor
+
+Graphy is **not** referenced via `<ProjectReference>`. It is a pre-built binary committed to this repo at `lib\Graphy.dll`. The `.vbproj` references it with a relative HintPath:
+
+```xml
+<Reference Include="Graphy">
+  <HintPath>..\lib\Graphy.dll</HintPath>
+</Reference>
+```
+
+Do not switch to a ProjectReference. A cross-solution ProjectReference between a C# project and a VB.NET project generates a machine-specific absolute path that breaks clones.
+
+### Updating Graphy
+
+If you change Graphy's source:
+
+1. Build Graphy in **Debug** configuration (not Release — see Graphy's DEVNOTES section 2)
+2. Copy `Graphy\bin\Debug\Graphy.dll` to `NetworkMonitor\lib\Graphy.dll`
+3. If you changed the public API, update `MainForm.Designer.vb` to match
+4. Build NetworkMonitor to verify, then commit both the DLL and any code changes together
+
+### Graphy configuration in MainForm.Designer.vb
+
+Two Graphy instances are configured at design time:
+
+- **GraphyDL** (download): `LineColour = Green`, `OverlayText = "DB: "`, `PaddingHeight = 0.9`
+- **GraphyUL** (upload): `LineColour = RoyalBlue`, `OverlayText = "UB: "`, `PaddingHeight = 0.9`
+
+Both use `GraphType.Gradient`, `ShowTextOverlay = True`, and `IndexIndicatorColour = White`.
+
+---
+
+## 10. Graphy control — graph rendering traps
 
 The `Graphy.dll` in `lib/` is a custom WinForms `UserControl` (source in the sibling `Graphy/` project). Several non-obvious issues exist in its rendering pipeline.
 
-### 9a. Graph must not draw into the overlay text area
+### 10a. Graph must not draw into the overlay text area
 
 **Symptom:** The graph line and fill render on top of or directly behind the "DB: / UB:" overlay text in the top-left corner, making the text hard to read.
 
@@ -128,7 +164,7 @@ y = topMargin + graphHeight * (1f - ratio * PaddingHeight);
 
 The gradient fill brush must also be anchored to `topMargin → Height`, not `0 → Height`, otherwise the gradient accumulates visible colour in the text zone even though no polygon fill is drawn there.
 
-### 9b. `FillPolygon` replaces per-column `DrawLine` for gradient/fill modes
+### 10b. `FillPolygon` replaces per-column `DrawLine` for gradient/fill modes
 
 The original code drew one vertical `DrawLine` per pixel column using a freshly allocated `LinearGradientBrush` and `Pen` — hundreds of GDI object pairs per frame, none disposed. The replacement is a single `FillPolygon` call with a cached brush:
 
@@ -137,7 +173,7 @@ The original code drew one vertical `DrawLine` per pixel column using a freshly 
 
 This reduces the fill from `Width` draw calls to 1 per frame.
 
-### 9c. `DrawLines` must receive exactly `count` points — no extras
+### 10c. `DrawLines` must receive exactly `count` points — no extras
 
 `Graphics.DrawLines` draws lines between **all** elements in the array it receives. If the reusable `_pointsBuffer` has `Length > count` (e.g., allocated at a previous larger size), the extra slots contain default `PointF(0, 0)` values, causing phantom lines to the top-left corner of the control.
 
@@ -152,7 +188,7 @@ g.DrawLines(_linePen, drawPoints);
 
 The buffer only ever grows (never shrinks mid-session), so after the warmup phase it equals `count` exactly and no copy is needed.
 
-### 9d. All GDI resources in the Graphy control must be cached
+### 10d. All GDI resources in the Graphy control must be cached
 
 The control creates `LinearGradientBrush`, `Pen`, `SolidBrush`, and `Font` objects. Every one of these must be cached as a field and only recreated when their inputs change (`LineColour`, `Height`, `topMargin`, `OverlayColour`, `IndexIndicatorColour`, `Parent.BackColor`). Creating them fresh inside `Paint` — especially inside a per-pixel loop — causes hundreds of unmanaged GDI handle allocations per second.
 
